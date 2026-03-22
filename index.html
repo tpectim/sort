@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>排序練習小遊戲 (雲端題庫整合版)</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+
+    <style>
+        /* ================= 全域設定 ================= */
+        :root {
+            --size-q: 85px;  
+            --size-a: 95px;  
+            --size-c: 85px;  
+            --font-q: 60px;  
+            --font-a: 65px;  
+            --font-c: 60px;  
+        }
+
+        * { box-sizing: border-box; font-family: "Microsoft JhengHei", "PingFang TC", sans-serif; margin: 0; padding: 0; }
+
+        body { 
+            background-color: #333; 
+            margin: 0; 
+            padding: 0;
+            overflow: hidden; 
+        }
+
+        /* --- 雙畫面分屏切換設計 --- */
+        .split-layout {
+            display: flex;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        /* 預設：左邊佔滿 100% 寬度 */
+        .split-left {
+            flex: 1;
+            width: 100%;
+            height: 100%;
+            overflow-y: auto; 
+            background-color: #f0f8ff;
+            padding: 10px;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            transition: width 0.3s ease-in-out; /* 開關時的滑順動畫 */
+        }
+
+        /* 預設：右邊隱藏 */
+        .split-right {
+            display: none; 
+            width: 50%;
+            height: 100%;
+            overflow-y: auto;
+            background-color: #f0f8ff;
+            padding: 10px;
+            justify-content: center;
+            align-items: flex-start;
+            border-left: 4px solid #444; 
+            pointer-events: none; 
+            user-select: none;
+            filter: brightness(0.97); 
+        }
+
+        /* 當啟動鏡像模式時 (.mirror-active) */
+        .split-layout.mirror-active .split-left {
+            width: 50%;
+            flex: none;
+        }
+        .split-layout.mirror-active .split-right {
+            display: flex; /* 顯示右半邊 */
+            flex: none;
+        }
+
+        /* ================= 佈局與容器 ================= */
+        .game-container { width: 100%; max-width: 900px; background: white; padding: 10px; border-radius: 12px; border: 3px solid #2196F3; box-shadow: 0 3px 8px rgba(0,0,0,0.1); }
+        .game-title { text-align: center; font-size: 1.3rem; margin: 0 0 5px 0; color: #333; }
+        .box { border: 2px solid #64B5F6; border-radius: 8px; padding: 6px; margin-bottom: 6px; background-color: #fafdfc; position: relative; }
+        .box h2 { font-size: 0.95rem; margin: 0 0 4px 0; color: #555; font-weight: bold; }
+
+        /* --- 收摺功能專用樣式 --- */
+        .toggle-header { cursor: pointer; display: flex; justify-content: space-between; align-items: center; user-select: none; -webkit-user-select: none; padding: 2px; border-radius: 4px; transition: background-color 0.2s; }
+        .toggle-header:hover { background-color: #e3f2fd; color: #2196F3 !important; }
+        .hidden-content { display: none !important; }
+        .settings-area.collapsed-box { min-width: auto; flex: 0 1 auto; }
+
+        .top-section { display: flex; gap: 8px; }
+        .question-area { flex: 2.8; }
+        .settings-area { flex: 1; font-size: 0.8rem; min-width: 140px; background-color: #f9fcff; border: 1px solid #d1e9ff; transition: all 0.2s; }
+        .setting-item { margin-bottom: 3px; display: flex; justify-content: space-between; align-items: center; }
+
+        .items-container, .slots-container { display: flex; flex-wrap: wrap; gap: 6px; min-height: 90px; align-items: center; }
+        .slots-container { justify-content: center; padding: 10px 0; }
+
+        .btn { background-color: #2196F3; color: white; border: none; padding: 5px 8px; border-radius: 4px; cursor: pointer; width: 100%; margin-top: 5px; font-size: 0.85rem; transition: background-color 0.1s; }
+        .btn:hover { background-color: #1976D2; }
+        .btn-secondary { background-color: #FF9800; }
+        .btn-secondary:hover { background-color: #F57C00; }
+        .btn-small { padding: 3px 6px; font-size: 0.8rem; margin-top: 3px; }
+        .btn-group-vertical { margin-top: 5px; border-top: 1px solid #eee; padding-top: 3px; }
+        .toolbar-inline { margin-bottom: 5px; display: flex; gap: 5px; }
+        .btn-outline { background-color: transparent; color: #333; border: 1px solid #ccc; }
+        .btn-outline:hover { background-color: #f0f0f0; }
+        .btn-delete { background-color: #F44336; color: white; border: none; padding: 2px 6px; border-radius: 4px; cursor: pointer; }
+        .btn-edit { background-color: #4CAF50; color: white; border: none; padding: 2px 6px; border-radius: 4px; cursor: pointer; margin-right: 3px; }
+        .upload-group { display: flex; gap: 8px; align-items: center; }
+        .file-input { display: block; width: 100%; padding: 6px; border: 2px dashed #90CAF9; border-radius: 8px; background: #f9f9f9; cursor: pointer; font-size: 0.8rem; }
+        input[type="number"] { padding: 1px; border: 1px solid #ccc; border-radius: 3px; }
+
+        /* ================= 遊戲物件 ================= */
+        .item { display: flex; justify-content: center; align-items: center; cursor: grab; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; transition: transform 0.1s; background: white; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.15); overflow: hidden; touch-action: none; }
+        .item:active { cursor: grabbing; transform: scale(1.05); }
+        .item:hover { transform: scale(1.03); }
+        .item img { width: 95%; height: 95%; object-fit: contain; pointer-events: none; }
+        .question-area .item { width: var(--size-q); height: var(--size-q); font-size: var(--font-q); }
+        .candidate-area .item { width: var(--size-c); height: var(--size-c); font-size: var(--font-c); }
+
+        /* ================= 作答格子 ================= */
+        .slot { width: var(--size-a); height: var(--size-a); border: 3px dashed #2196F3; border-radius: 12px; display: flex; justify-content: center; align-items: center; background-color: #e3f2fd; transition: all 0.2s; }
+        .slot.active { border-color: #4CAF50; background-color: #e8f5e9; transform: scale(1.03); box-shadow: 0 0 8px rgba(76, 175, 80, 0.4); }
+        .slot.filled { border-style: solid; background-color: transparent; }
+        .slot.filled .item { width: 100%; height: 100%; font-size: var(--font-a); box-shadow: none; border-radius: 8px; }
+
+        /* ================= 後台資料表格 ================= */
+        .data-table { width: 100%; border-collapse: collapse; margin-top: 5px; font-size: 0.8rem; }
+        .data-table th, .data-table td { border: 1px solid #eee; padding: 3px; text-align: center; }
+        .data-table th { background-color: #E3F2FD; color: #333; font-weight: bold; }
+        .preview-img { width: 45px; height: 45px; object-fit: contain; border-radius: 4px; }
+
+        /* ================= 動畫特效 ================= */
+        @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 50% { transform: translateX(4px); } 75% { transform: translateX(-4px); } }
+        .error-shake { animation: shake 0.3s ease-in-out; border-color: #F44336 !important; }
+        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(255, 152, 0, 0.7); } 70% { box-shadow: 0 0 0 10px rgba(255, 152, 0, 0); } 100% { box-shadow: 0 0 0 0 rgba(255, 152, 0, 0); } }
+        .hint-glow { animation: pulse 1.2s infinite; border: 3px solid #FF9800 !important; }
+    </style>
+</head>
+<body>
+    <div class="split-layout" id="app-layout">
+        
+        <div class="split-left" id="main-content">
+            <div id="game-view" class="game-container">
+                <h1 class="game-title">排序練習</h1>
+                
+                <div class="top-section">
+                    <div class="question-area box">
+                        <h2>題目區</h2>
+                        <div id="question-container" class="items-container"></div>
+                    </div>
+
+                    <div class="settings-area box">
+                        <h2 id="settings-toggle" class="toggle-header" title="點擊收摺/展開">
+                            快速設定 <span id="settings-toggle-icon">▼</span>
+                        </h2>
+                        
+                        <div id="settings-content">
+                            <div class="setting-item">
+                                <label>題目數量：</label>
+                                <input type="number" id="setting-count" value="4" min="1" max="30" style="width: 45px;">
+                            </div>
+                            <div class="setting-item">
+                                <label>重複次數：</label>
+                                <input type="number" id="setting-repeat" value="1" min="1" max="30" style="width: 45px;">
+                            </div>
+                            <div class="setting-item">
+                                <label>干擾項數：</label>
+                                <input type="number" id="setting-distractor" value="0" min="0" max="5" style="width: 45px;">
+                            </div>
+                            <div class="setting-item" style="border-top: 1px dashed #ccc; padding-top: 5px; margin-top: 5px;">
+                                <label>題目大小：</label>
+                                <input type="number" id="setting-size-q" value="85" min="40" max="200" step="5" style="width: 45px;">
+                            </div>
+                            <div class="setting-item">
+                                <label>作答大小：</label>
+                                <input type="number" id="setting-size-a" value="95" min="40" max="200" step="5" style="width: 45px;">
+                            </div>
+                            <div class="setting-item">
+                                <label>候選大小：</label>
+                                <input type="number" id="setting-size-c" value="85" min="40" max="200" step="5" style="width: 45px;">
+                            </div>
+                            <div class="setting-item" style="border-top: 1px dashed #ccc; padding-top: 5px; margin-top: 5px;">
+                                <label>錯誤提示：</label>
+                                <input type="number" id="setting-hint-error" value="3" min="0" max="10" style="width: 45px;"> 次
+                            </div>
+                            <div class="setting-item">
+                                <label>語音讀題：</label>
+                                <input type="checkbox" id="setting-voice" checked> 開啟
+                            </div>
+                            <div class="setting-item">
+                                <label style="color: #2196F3; font-weight: bold;">雙屏鏡像：</label>
+                                <input type="checkbox" id="setting-mirror"> 開啟
+                            </div>
+                            
+                            <div class="btn-group-vertical">
+                                <button id="btn-restart" class="btn btn-small">🔄 更換題目</button>
+                                <button id="btn-open-settings" class="btn btn-secondary btn-small">⚙️ 進入後台設定</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="answer-area box">
+                    <h2>作答區</h2>
+                    <div id="answer-container" class="slots-container"></div>
+                </div>
+
+                <div class="candidate-area box">
+                    <h2>候選區</h2>
+                    <div id="candidate-container" class="items-container"></div>
+                </div>
+            </div>
+
+            <div id="settings-view" class="game-container" style="display: none;">
+                <h1 class="game-title">⚙️ 後台設定與圖庫管理</h1>
+                <div class="box">
+                    <h2>📁 設定檔管理</h2>
+                    <div class="upload-group" style="margin-bottom: 10px;">
+                        <button id="btn-export" class="btn btn-small" style="width: auto;">📥 匯出目前設定</button>
+                        <input type="file" id="input-import" accept=".json" style="display: none;">
+                        <button id="btn-trigger-import" class="btn btn-secondary btn-small" style="width: auto;">📤 本機匯入</button>
+                    </div>
+                    
+                    <div class="upload-group" style="border-top: 1px dashed #ccc; padding-top: 10px; flex-wrap: wrap;">
+                        <span style="font-size: 0.9rem; color: #2196F3; font-weight: bold; width: 100%;">☁️ 從 Firebase 雲端題庫載入：</span>
+                        <select id="firebase-theme-select" style="flex: 1; padding: 6px; border-radius: 4px; border: 2px solid #90CAF9; min-width: 150px;">
+                            <option value="">正在連線至資料庫...</option>
+                        </select>
+                        <button id="btn-firebase-import" class="btn btn-secondary btn-small" style="width: auto; margin: 0; padding: 6px 12px; font-weight: bold;">下載並套用</button>
+                    </div>
+                </div>
+                
+                <div class="box">
+                    <h2>🖼️ 新增圖片或 Emoji</h2>
+                    <div class="upload-group">
+                        <input type="file" id="input-images" multiple accept="image/png, image/jpeg, image/jpg" class="file-input">
+                        <button id="btn-add-emoji" class="btn btn-outline" style="margin: 0; width: auto; padding: 4px 8px; font-size: 0.85rem;">➕ 新增 Emoji</button>
+                    </div>
+                </div>
+                <div class="box">
+                    <h2>📋 目前圖庫清單</h2>
+                    <div class="toolbar-inline">
+                        <button id="btn-select-all" class="btn btn-small btn-outline" style="width: auto;">☑️ 全選</button>
+                        <button id="btn-deselect-all" class="btn btn-small btn-outline" style="width: auto;">☐ 全不選</button>
+                    </div>
+                    <table class="data-table">
+                        <thead><tr><th>啟用</th><th>預覽</th><th>名稱</th><th>屬性</th><th>操作</th></tr></thead>
+                        <tbody id="image-table-body"></tbody>
+                    </table>
+                </div>
+                <button id="btn-close-settings" class="btn" style="background-color: #4CAF50;">✅ 完成並返回遊戲</button>
+            </div>
+        </div>
+
+        <div class="split-right" id="mirror-content">
+        </div>
+        
+    </div>
+
+    <script>
+        // ================= 初始化 Firebase =================
+        const firebaseConfig = {
+            apiKey: "AIzaSyAW30YA99hzb1rgMfcSySzFSKONF_txy74",
+            authDomain: "picpic-89881.firebaseapp.com",
+            projectId: "picpic-89881",
+            storageBucket: "picpic-89881.firebasestorage.app",
+            messagingSenderId: "555976169158",
+            appId: "1:555976169158:web:f5e05ebc56d95f12b9e9c7"
+        };
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        const collectionName = "question_bank";
+
+        // ================= 初始化手機觸控 =================
+        window.addEventListener('touchmove', function() {}, {passive: false});
+
+        const mainContent = document.getElementById('main-content');
+        const appLayout = document.getElementById('app-layout');
+
+        // ================= 預設圖庫與系統狀態 =================
+        let imagePool = [];
+        const defaultPool = [
+            { id: 'img1', name: '飛盤', icon: '🥏', prop: '玩具', src: '', enabled: true },
+            { id: 'img2', name: '鬧鐘', icon: '⏰', prop: '日常', src: '', enabled: true },
+            { id: 'img3', name: '電梯', icon: '🛗', prop: '設施', src: '', enabled: true },
+            { id: 'img4', name: '日曆', icon: '📅', prop: '日常', src: '', enabled: true },
+            { id: 'img5', name: '紅綠燈', icon: '🚦', prop: '設施', src: '', enabled: true },
+            { id: 'img6', name: '太陽', icon: '☀️', prop: '自然', src: '', enabled: true },
+            { id: 'img7', name: '蘋果', icon: '🍎', prop: '食物', src: '', enabled: true }
+        ];
+
+        let currentQuestion = [];   
+        let expectedSequence = [];  
+        let currentStep = 0;
+        let errorCount = 0;
+
+        // --- DOM 元素獲取 ---
+        const gameView = document.getElementById('game-view');
+        const settingsView = document.getElementById('settings-view');
+        const questionContainer = document.getElementById('question-container');
+        const answerContainer = document.getElementById('answer-container');
+        const candidateContainer = document.getElementById('candidate-container');
+        const btnRestart = document.getElementById('btn-restart');
+
+        const settingCount = document.getElementById('setting-count');
+        const settingRepeat = document.getElementById('setting-repeat');
+        const settingDistractor = document.getElementById('setting-distractor');
+        const settingVoice = document.getElementById('setting-voice');
+        const settingMirror = document.getElementById('setting-mirror');
+        const settingHintError = document.getElementById('setting-hint-error');
+
+        const settingSizeQ = document.getElementById('setting-size-q');
+        const settingSizeA = document.getElementById('setting-size-a');
+        const settingSizeC = document.getElementById('setting-size-c');
+
+        const btnOpenSettings = document.getElementById('btn-open-settings');
+        const btnCloseSettings = document.getElementById('btn-close-settings');
+        const inputImages = document.getElementById('input-images');
+        const btnAddEmoji = document.getElementById('btn-add-emoji');
+        const imageTableBody = document.getElementById('image-table-body');
+        const btnExport = document.getElementById('btn-export');
+        const btnTriggerImport = document.getElementById('btn-trigger-import');
+        const inputImport = document.getElementById('input-import');
+
+        // Firebase 相關 DOM
+        const selectFirebase = document.getElementById('firebase-theme-select');
+        const btnFirebaseImport = document.getElementById('btn-firebase-import');
+
+        // --- 收摺控制 ---
+        const settingsToggle = document.getElementById('settings-toggle');
+        const settingsContent = document.getElementById('settings-content');
+        const settingsToggleIcon = document.getElementById('settings-toggle-icon');
+
+        settingsToggle.addEventListener('click', () => {
+            settingsContent.classList.toggle('hidden-content');
+            const settingsAreaBox = settingsToggle.closest('.settings-area');
+            settingsAreaBox.classList.toggle('collapsed-box');
+            settingsToggleIcon.innerText = settingsContent.classList.contains('hidden-content') ? '◀' : '▼';
+        });
+
+        function boot() {
+            if (imagePool.length === 0) imagePool = [...defaultPool];
+            updateSizes(); 
+            initGame();
+            toggleMirrorMode();
+            initFirebaseThemes(); // 啟動時自動抓取 Firebase 主題
+        }
+
+        function updateSizes() {
+            const root = document.documentElement;
+            const sq = parseInt(settingSizeQ.value) || 85;
+            const sa = parseInt(settingSizeA.value) || 95;
+            const sc = parseInt(settingSizeC.value) || 85;
+            root.style.setProperty('--size-q', sq + 'px');
+            root.style.setProperty('--size-a', sa + 'px');
+            root.style.setProperty('--size-c', sc + 'px');
+            root.style.setProperty('--font-q', (sq * 0.7) + 'px');
+            root.style.setProperty('--font-a', (sa * 0.7) + 'px');
+            root.style.setProperty('--font-c', (sc * 0.7) + 'px');
+        }
+
+        ['input', 'change'].forEach(evt => {
+            settingSizeQ.addEventListener(evt, updateSizes);
+            settingSizeA.addEventListener(evt, updateSizes);
+            settingSizeC.addEventListener(evt, updateSizes);
+        });
+
+
+        // ================= 雙屏鏡像同步系統 =================
+        let mirrorPending = false;
+        let mirrorObserver = null;
+        const mirrorContent = document.getElementById('mirror-content');
+
+        function syncMirror() {
+            if (!settingMirror.checked || mirrorPending) return;
+            mirrorPending = true;
+            requestAnimationFrame(() => {
+                mirrorContent.innerHTML = mainContent.innerHTML;
+                const mainInputs = mainContent.querySelectorAll('input, select');
+                const mirrorInputs = mirrorContent.querySelectorAll('input, select');
+                mainInputs.forEach((input, index) => {
+                    if(mirrorInputs[index]) {
+                        if(input.type === 'checkbox') mirrorInputs[index].checked = input.checked;
+                        else mirrorInputs[index].value = input.value;
+                    }
+                });
+                mirrorPending = false;
+            });
+        }
+
+        function toggleMirrorMode() {
+            if (settingMirror.checked) {
+                appLayout.classList.add('mirror-active');
+                if (!mirrorObserver) mirrorObserver = new MutationObserver(syncMirror);
+                mirrorObserver.observe(mainContent, { childList: true, subtree: true, attributes: true, characterData: true });
+                mainContent.addEventListener('input', syncMirror);
+                syncMirror();
+            } else {
+                appLayout.classList.remove('mirror-active');
+                if (mirrorObserver) mirrorObserver.disconnect();
+                mainContent.removeEventListener('input', syncMirror);
+                mirrorContent.innerHTML = '';
+            }
+        }
+        settingMirror.addEventListener('change', toggleMirrorMode);
+
+
+        // ================= 遊戲核心邏輯 =================
+        function initGame() {
+            currentStep = 0; errorCount = 0; currentQuestion = []; expectedSequence = [];
+            questionContainer.innerHTML = ''; answerContainer.innerHTML = ''; candidateContainer.innerHTML = ''; removeHints();
+
+            const activePool = imagePool.filter(img => img.enabled !== false);
+            const count = Math.min(parseInt(settingCount.value) || 1, activePool.length); 
+            const repeatCount = parseInt(settingRepeat.value) || 1;
+            const distractorCount = parseInt(settingDistractor.value) || 0;
+
+            if(count < 1) { alert("沒有啟用的圖庫！請至後台設定或載入雲端題庫。"); return; }
+
+            const shuffledPool = [...activePool].sort(() => 0.5 - Math.random());
+            currentQuestion = shuffledPool.slice(0, count);
+            for (let r = 0; r < repeatCount; r++) { expectedSequence.push(...currentQuestion); }
+
+            currentQuestion.forEach(item => { questionContainer.appendChild(createItemElement(item, false)); });
+            for (let i = 0; i < expectedSequence.length; i++) {
+                const slot = document.createElement('div'); slot.classList.add('slot'); slot.dataset.index = i; answerContainer.appendChild(slot);
+            }
+            updateActiveSlot();
+
+            const remainingPool = activePool.filter(img => !currentQuestion.find(q => q.id === img.id));
+            const distractors = [...remainingPool].sort(() => 0.5 - Math.random()).slice(0, distractorCount);
+            const candidates = [...currentQuestion, ...distractors].sort(() => 0.5 - Math.random());
+            candidates.forEach(item => { candidateContainer.appendChild(createItemElement(item, true)); });
+        }
+
+        function createItemElement(itemData, isDraggable) {
+            const el = document.createElement('div'); el.classList.add('item'); el.dataset.id = itemData.id; el.dataset.name = itemData.name;
+            if (itemData.src) { const img = document.createElement('img'); img.src = itemData.src; el.appendChild(img); } 
+            else { el.innerText = itemData.icon || '🖼️'; }
+            el.addEventListener('click', () => { speak(el.dataset.name); });
+            if (isDraggable) el.addEventListener('pointerdown', handlePointerDown);
+            return el;
+        }
+
+        function speak(text) {
+            if (!settingVoice.checked) return;
+            const utterance = new SpeechSynthesisUtterance(text); utterance.lang = 'zh-TW'; utterance.rate = 0.9; window.speechSynthesis.speak(utterance);
+        }
+
+        // ================= 自製觸控拖放系統 =================
+        let draggedItem = null; let dragGhost = null; let dragGhostMirror = null; let offsetX = 0; let offsetY = 0;
+
+        function handlePointerDown(e) {
+            if (e.button !== 0 && e.pointerType === 'mouse') return; 
+            draggedItem = e.currentTarget;
+            const rect = draggedItem.getBoundingClientRect();
+            offsetX = e.clientX - rect.left; offsetY = e.clientY - rect.top;
+
+            dragGhost = draggedItem.cloneNode(true);
+            dragGhost.style.position = 'fixed';
+            const sc = parseInt(settingSizeC.value) || 85;
+            dragGhost.style.width = sc + 'px'; dragGhost.style.height = sc + 'px'; dragGhost.style.fontSize = (sc * 0.7) + 'px';
+            dragGhost.style.left = e.clientX - offsetX + 'px'; dragGhost.style.top = e.clientY - offsetY + 'px';
+            dragGhost.style.zIndex = '9999'; dragGhost.style.pointerEvents = 'none'; dragGhost.style.opacity = '0.8'; dragGhost.style.transform = 'scale(1.1)'; dragGhost.style.margin = '0';
+            document.body.appendChild(dragGhost);
+
+            if (settingMirror.checked) {
+                dragGhostMirror = dragGhost.cloneNode(true);
+                dragGhostMirror.style.left = (e.clientX - offsetX) + (window.innerWidth / 2) + 'px';
+                document.body.appendChild(dragGhostMirror);
+            }
+
+            document.addEventListener('pointermove', handlePointerMove); document.addEventListener('pointerup', handlePointerUp); document.addEventListener('pointercancel', handlePointerUp);
+            draggedItem.setPointerCapture(e.pointerId);
+        }
+
+        function handlePointerMove(e) {
+            if (!dragGhost) return;
+            e.preventDefault(); 
+            dragGhost.style.left = e.clientX - offsetX + 'px'; dragGhost.style.top = e.clientY - offsetY + 'px';
+            if (settingMirror.checked && dragGhostMirror) {
+                dragGhostMirror.style.left = (e.clientX - offsetX) + (window.innerWidth / 2) + 'px';
+                dragGhostMirror.style.top = e.clientY - offsetY + 'px';
+            }
+        }
+
+        function handlePointerUp(e) {
+            if (!dragGhost) return;
+            document.removeEventListener('pointermove', handlePointerMove); document.removeEventListener('pointerup', handlePointerUp); document.removeEventListener('pointercancel', handlePointerUp);
+            draggedItem.releasePointerCapture(e.pointerId);
+
+            dragGhost.remove(); dragGhost = null;
+            if (dragGhostMirror) { dragGhostMirror.remove(); dragGhostMirror = null; }
+
+            const dropTarget = document.elementFromPoint(e.clientX, e.clientY);
+            const slot = dropTarget ? dropTarget.closest('.slot') : null;
+            if (slot) processDrop(slot, draggedItem); else triggerError(draggedItem);
+            draggedItem = null;
+        }
+
+        function processDrop(slot, draggedElement) {
+            const draggedId = draggedElement.dataset.id;
+            const maxErrors = parseInt(settingHintError.value);
+            const repeatCount = parseInt(settingRepeat.value) || 1;
+
+            if (parseInt(slot.dataset.index) !== currentStep) return handleMistake(slot, maxErrors);
+
+            if (draggedId === expectedSequence[currentStep].id) {
+                let placedElement;
+                if (repeatCount > 1) {
+                    placedElement = draggedElement.cloneNode(true);
+                    placedElement.style.width = ''; placedElement.style.height = ''; placedElement.style.fontSize = '';
+                    placedElement.addEventListener('click', () => { speak(placedElement.dataset.name); });
+                    slot.appendChild(placedElement);
+                } else {
+                    placedElement = draggedElement; placedElement.removeEventListener('pointerdown', handlePointerDown); slot.appendChild(placedElement);
+                }
+                slot.classList.add('filled'); speak(placedElement.dataset.name);
+                currentStep++; errorCount = 0; removeHints(); updateActiveSlot();
+                if (currentStep >= expectedSequence.length) setTimeout(() => { triggerVictory(); }, 500); 
+            } else { handleMistake(slot, maxErrors); }
+        }
+
+        function triggerVictory() { speak("全部完成了，真是太棒了！"); confetti({ particleCount: 150, spread: 80, origin: { y: 0.6 }, colors: ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff'] }); }
+        function handleMistake(slotElement, maxErrors) { triggerError(slotElement); errorCount++; if (maxErrors > 0 && errorCount >= maxErrors) showHint(); }
+        function triggerError(el) { el.classList.add('error-shake'); setTimeout(() => el.classList.remove('error-shake'), 400); }
+        function updateActiveSlot() { mainContent.querySelectorAll('.slot').forEach((slot, i) => i === currentStep ? slot.classList.add('active') : slot.classList.remove('active')); }
+        function showHint() {
+            removeHints(); if(currentStep >= expectedSequence.length) return;
+            mainContent.querySelector(`.slot[data-index="${currentStep}"]`)?.classList.add('hint-glow');
+            mainContent.querySelector(`.candidate-area .item[data-id="${expectedSequence[currentStep].id}"]`)?.classList.add('hint-glow');
+        }
+        function removeHints() { mainContent.querySelectorAll('.hint-glow').forEach(el => el.classList.remove('hint-glow')); }
+
+        btnRestart.addEventListener('click', initGame);
+        ['change'].forEach(evt => { settingCount.addEventListener(evt, initGame); settingRepeat.addEventListener(evt, initGame); settingDistractor.addEventListener(evt, initGame); });
+
+
+        // ================= 後台管理邏輯 =================
+        btnOpenSettings.addEventListener('click', () => { gameView.style.display = 'none'; settingsView.style.display = 'block'; renderTable(); });
+        btnCloseSettings.addEventListener('click', () => { settingsView.style.display = 'none'; gameView.style.display = 'block'; initGame(); });
+
+        btnAddEmoji.addEventListener('click', () => {
+            const icon = prompt("請輸入一個 Emoji (例如 🐶, 🚗):", "🐶"); if(!icon) return;
+            const name = prompt("請輸入名稱 (例如 小狗):", "未命名"); const prop = prompt("請輸入屬性分類 (例如 動物):", "未分類");
+            imagePool.push({ id: 'img_' + Date.now() + Math.floor(Math.random() * 1000), name: name || "未命名", icon: icon, prop: prop || "未分類", src: '', enabled: true }); renderTable();
+        });
+
+        inputImages.addEventListener('change', async (e) => {
+            const files = e.target.files;
+            for (let file of files) {
+                const fileNameNoExt = file.name.substring(0, file.name.lastIndexOf('.')) || file.name; const parts = fileNameNoExt.split('_');
+                imagePool.push({ id: 'img_' + Date.now() + Math.floor(Math.random() * 1000), name: parts[0] || '未命名', prop: parts[1] || '未分類', src: await readFileAsDataURL(file), enabled: true });
+            }
+            inputImages.value = ''; renderTable();
+        });
+
+        function readFileAsDataURL(file) { return new Promise((resolve) => { const reader = new FileReader(); reader.onload = (e) => resolve(e.target.result); reader.readAsDataURL(file); }); }
+
+        function renderTable() {
+            imageTableBody.innerHTML = '';
+            imagePool.forEach((item, index) => {
+                const isChecked = item.enabled !== false ? 'checked' : ''; 
+                const tr = document.createElement('tr');
+                tr.innerHTML = `<td><input type="checkbox" class="toggle-enable" data-index="${index}" ${isChecked} style="width: 20px; height: 20px; cursor: pointer;"></td><td>${item.src ? `<img src="${item.src}" class="preview-img">` : `<span style="font-size:24px;">${item.icon}</span>`}</td><td>${item.name}</td><td>${item.prop}</td><td><button class="btn-edit" onclick="editImage(${index})">編輯</button><button class="btn-delete" onclick="deleteImage(${index})">刪除</button></td>`;
+                imageTableBody.appendChild(tr);
+            });
+            mainContent.querySelectorAll('.toggle-enable').forEach(checkbox => { checkbox.addEventListener('change', (e) => { imagePool[e.target.dataset.index].enabled = e.target.checked; }); });
+        }
+
+        document.getElementById('btn-select-all').addEventListener('click', () => { imagePool.forEach(item => item.enabled = true); renderTable(); });
+        document.getElementById('btn-deselect-all').addEventListener('click', () => { imagePool.forEach(item => item.enabled = false); renderTable(); });
+        window.editImage = function(index) { const item = imagePool[index]; const newName = prompt("編輯名稱:", item.name); if (newName !== null && newName.trim() !== "") item.name = newName.trim(); const newProp = prompt("編輯屬性:", item.prop); if (newProp !== null) item.prop = newProp.trim(); renderTable(); }
+        window.deleteImage = function(index) { if(confirm('確定要刪除這張圖片嗎？')) { imagePool.splice(index, 1); renderTable(); } }
+
+        btnExport.addEventListener('click', () => {
+            const exportData = { 
+                settings: { count: settingCount.value, repeat: settingRepeat.value, distractor: settingDistractor.value, sizeQ: settingSizeQ.value, sizeA: settingSizeA.value, sizeC: settingSizeC.value, voice: settingVoice.checked, mirror: settingMirror.checked, hintError: settingHintError.value }, 
+                images: imagePool 
+            };
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportData));
+            const downloadAnchorNode = document.createElement('a'); downloadAnchorNode.setAttribute("href", dataStr); downloadAnchorNode.setAttribute("download", "排序遊戲設定檔.json"); document.body.appendChild(downloadAnchorNode); downloadAnchorNode.click(); downloadAnchorNode.remove();
+        });
+
+        btnTriggerImport.addEventListener('click', () => inputImport.click());
+        inputImport.addEventListener('change', (e) => {
+            const file = e.target.files[0]; if (!file) return; const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const importedData = JSON.parse(e.target.result);
+                    if (importedData.images && Array.isArray(importedData.images)) {
+                        imagePool = importedData.images;
+                        if(importedData.settings) {
+                            if(importedData.settings.count) settingCount.value = importedData.settings.count;
+                            if(importedData.settings.repeat) settingRepeat.value = importedData.settings.repeat;
+                            if(importedData.settings.distractor) settingDistractor.value = importedData.settings.distractor;
+                            if(importedData.settings.sizeQ) settingSizeQ.value = importedData.settings.sizeQ;
+                            if(importedData.settings.sizeA) settingSizeA.value = importedData.settings.sizeA;
+                            if(importedData.settings.sizeC) settingSizeC.value = importedData.settings.sizeC;
+                            if(importedData.settings.voice !== undefined) settingVoice.checked = importedData.settings.voice;
+                            if(importedData.settings.mirror !== undefined) { settingMirror.checked = importedData.settings.mirror; toggleMirrorMode(); }
+                            if(importedData.settings.hintError) settingHintError.value = importedData.settings.hintError;
+                        }
+                        updateSizes(); renderTable(); alert('匯入成功！');
+                    } else { alert('檔案格式錯誤！'); }
+                } catch (err) { alert('解析 JSON 失敗，請確認檔案正確性。'); }
+            };
+            reader.readAsText(file); inputImport.value = ''; 
+        });
+
+        // ================= Firebase 雲端題庫載入邏輯 =================
+        async function initFirebaseThemes() {
+            try {
+                const snapshot = await db.collection(collectionName).get();
+                if (snapshot.empty) {
+                    selectFirebase.innerHTML = '<option value="">資料庫目前空空的</option>';
+                    return;
+                }
+
+                const themes = new Set();
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    if (data.theme) themes.add(data.theme);
+                });
+                
+                selectFirebase.innerHTML = '<option value="all">載入全部主題 (混合)</option>';
+                Array.from(themes).sort().forEach(theme => {
+                    const option = document.createElement('option');
+                    option.value = theme;
+                    option.textContent = `主題：${theme}`;
+                    selectFirebase.appendChild(option);
+                });
+            } catch (error) {
+                console.error("連線資料庫失敗:", error);
+                selectFirebase.innerHTML = '<option value="">連線失敗，請檢查網路</option>';
+            }
+        }
+
+        btnFirebaseImport.addEventListener('click', async () => {
+            const selectedTheme = selectFirebase.value;
+            if (!selectedTheme) return;
+            
+            const originalText = btnFirebaseImport.innerText;
+            btnFirebaseImport.innerText = "⏳ 下載中...";
+            btnFirebaseImport.disabled = true;
+            
+            try {
+                let query = db.collection(collectionName);
+                // 如果不是選 'all'，就加入過濾條件
+                if (selectedTheme !== 'all') {
+                    query = query.where('theme', '==', selectedTheme);
+                }
+                
+                const snapshot = await query.get();
+                if (snapshot.empty) {
+                    alert('❌ 找不到該主題的圖片！');
+                    return;
+                }
+                
+                const newImages = [];
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    if (data.original) {
+                        newImages.push({
+                            id: doc.id, // 保留文檔 ID 作為唯一值
+                            name: data.name || '未命名',
+                            icon: '',
+                            prop: data.category || data.attr1 || '未分類', // 將屬性帶入供過濾辨識用
+                            src: data.original,
+                            enabled: true
+                        });
+                    }
+                });
+                
+                imagePool = newImages; // 覆蓋目前的圖庫
+                updateSizes(); 
+                renderTable(); 
+                alert(`☁️ 成功從雲端載入 ${newImages.length} 張圖片！`);
+                
+            } catch (error) {
+                console.error("下載失敗:", error);
+                alert(`下載失敗！\n錯誤原因：${error.message}`);
+            } finally {
+                btnFirebaseImport.innerText = originalText;
+                btnFirebaseImport.disabled = false;
+            }
+        });
+
+        // ================= 啟動程式 =================
+        boot();
+    </script>
+</body>
+</html>
