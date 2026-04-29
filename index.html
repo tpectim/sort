@@ -6,9 +6,6 @@
     <title>排序練習小遊戲 (雲端題庫整合版)</title>
     
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
-    
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
 
     <style>
         /* ================= 全域設定 ================= */
@@ -219,18 +216,18 @@
                 <div class="box">
                     <h2>📁 設定檔管理</h2>
                     <div class="upload-group" style="margin-bottom: 10px;">
-    <button id="btn-export" class="btn btn-small" style="width: auto;">📥 匯出目前設定</button>
-    <input type="file" id="input-import" accept=".json" style="display: none;">
-    <button id="btn-trigger-import" class="btn btn-secondary btn-small" style="width: auto;">📤 本機匯入</button>
-    <a href="https://drive.google.com/drive/folders/1GIZjD2PTZ3OZ1qVVX7boC4CNbik7nR6F?usp=sharing" target="_blank" class="btn btn-small" style="width: auto; background-color: #4CAF50; text-decoration: none; display: inline-flex; align-items: center;">📂 範例下載</a>
-</div>
+                        <button id="btn-export" class="btn btn-small" style="width: auto;">📥 匯出目前設定</button>
+                        <input type="file" id="input-import" accept=".json" style="display: none;">
+                        <button id="btn-trigger-import" class="btn btn-secondary btn-small" style="width: auto;">📤 本機匯入</button>
+                        <a href="https://drive.google.com/drive/folders/1GIZjD2PTZ3OZ1qVVX7boC4CNbik7nR6F?usp=sharing" target="_blank" class="btn btn-small" style="width: auto; background-color: #4CAF50; text-decoration: none; display: inline-flex; align-items: center;">📂 範例下載</a>
+                    </div>
                     
                     <div class="upload-group" style="border-top: 1px dashed #ccc; padding-top: 10px; flex-wrap: wrap;">
-                        <span style="font-size: 0.9rem; color: #2196F3; font-weight: bold; width: 100%;">☁️ 從 Firebase 雲端題庫載入：</span>
-                        <select id="firebase-theme-select" style="flex: 1; padding: 6px; border-radius: 4px; border: 2px solid #90CAF9; min-width: 150px;">
-                            <option value="">正在連線至資料庫...</option>
+                        <span style="font-size: 0.9rem; color: #2196F3; font-weight: bold; width: 100%;">☁️ 從 GitHub (picoffline) 載入：</span>
+                        <select id="github-theme-select" style="flex: 1; padding: 6px; border-radius: 4px; border: 2px solid #90CAF9; min-width: 150px;">
+                            <option value="">正在連線至 GitHub...</option>
                         </select>
-                        <button id="btn-firebase-import" class="btn btn-secondary btn-small" style="width: auto; margin: 0; padding: 6px 12px; font-weight: bold;">下載並套用</button>
+                        <button id="btn-github-import" class="btn btn-secondary btn-small" style="width: auto; margin: 0; padding: 6px 12px; font-weight: bold;">下載並套用</button>
                     </div>
                 </div>
                 
@@ -262,19 +259,6 @@
     </div>
 
     <script>
-        // ================= 初始化 Firebase =================
-        const firebaseConfig = {
-            apiKey: "AIzaSyAW30YA99hzb1rgMfcSySzFSKONF_txy74",
-            authDomain: "picpic-89881.firebaseapp.com",
-            projectId: "picpic-89881",
-            storageBucket: "picpic-89881.firebasestorage.app",
-            messagingSenderId: "555976169158",
-            appId: "1:555976169158:web:f5e05ebc56d95f12b9e9c7"
-        };
-        firebase.initializeApp(firebaseConfig);
-        const db = firebase.firestore();
-        const collectionName = "question_bank";
-
         // ================= 初始化手機觸控 =================
         window.addEventListener('touchmove', function() {}, {passive: false});
 
@@ -326,9 +310,9 @@
         const btnTriggerImport = document.getElementById('btn-trigger-import');
         const inputImport = document.getElementById('input-import');
 
-        // Firebase 相關 DOM
-        const selectFirebase = document.getElementById('firebase-theme-select');
-        const btnFirebaseImport = document.getElementById('btn-firebase-import');
+        // GitHub 相關 DOM
+        const selectGithub = document.getElementById('github-theme-select');
+        const btnGithubImport = document.getElementById('btn-github-import');
 
         // --- 收摺控制 ---
         const settingsToggle = document.getElementById('settings-toggle');
@@ -347,7 +331,7 @@
             updateSizes(); 
             initGame();
             toggleMirrorMode();
-            initFirebaseThemes(); // 啟動時自動抓取 Firebase 主題
+            initGithubThemes(); // 啟動時自動抓取 GitHub 上的 JSON 列表
         }
 
         function updateSizes() {
@@ -612,81 +596,86 @@
             reader.readAsText(file); inputImport.value = ''; 
         });
 
-        // ================= Firebase 雲端題庫載入邏輯 =================
-        async function initFirebaseThemes() {
+        // ================= GitHub 雲端題庫載入邏輯 =================
+        async function initGithubThemes() {
             try {
-                const snapshot = await db.collection(collectionName).get();
-                if (snapshot.empty) {
-                    selectFirebase.innerHTML = '<option value="">資料庫目前空空的</option>';
+                // 呼叫 GitHub API 取得根目錄下的檔案列表
+                const response = await fetch('https://api.github.com/repos/tpectim/picoffline/contents/');
+                if (!response.ok) throw new Error('無法取得 GitHub 檔案列表');
+                
+                const data = await response.json();
+                // 過濾出 .json 結尾的檔案
+                const jsonFiles = data.filter(file => file.name.endsWith('.json'));
+                
+                if (jsonFiles.length === 0) {
+                    selectGithub.innerHTML = '<option value="">找不到任何 JSON 題庫檔案</option>';
                     return;
                 }
-
-                const themes = new Set();
-                snapshot.forEach(doc => {
-                    const data = doc.data();
-                    if (data.theme) themes.add(data.theme);
-                });
                 
-                selectFirebase.innerHTML = '<option value="all">載入全部主題 (混合)</option>';
-                Array.from(themes).sort().forEach(theme => {
+                selectGithub.innerHTML = '<option value="">請選擇要下載的題庫...</option>';
+                jsonFiles.forEach(file => {
                     const option = document.createElement('option');
-                    option.value = theme;
-                    option.textContent = `主題：${theme}`;
-                    selectFirebase.appendChild(option);
+                    // 儲存原始檔案的下載網址 (raw url)
+                    option.value = file.download_url;
+                    // 將副檔名去掉讓顯示好看點
+                    const displayName = file.name.replace('.json', '');
+                    option.textContent = `📂 ${displayName}`;
+                    selectGithub.appendChild(option);
                 });
             } catch (error) {
-                console.error("連線資料庫失敗:", error);
-                selectFirebase.innerHTML = '<option value="">連線失敗，請檢查網路</option>';
+                console.error("連線 GitHub 失敗:", error);
+                selectGithub.innerHTML = '<option value="">連線失敗，請檢查網路</option>';
             }
         }
 
-        btnFirebaseImport.addEventListener('click', async () => {
-            const selectedTheme = selectFirebase.value;
-            if (!selectedTheme) return;
+        btnGithubImport.addEventListener('click', async () => {
+            const fileUrl = selectGithub.value;
+            if (!fileUrl) {
+                alert("請先選擇一個題庫！");
+                return;
+            }
             
-            const originalText = btnFirebaseImport.innerText;
-            btnFirebaseImport.innerText = "⏳ 下載中...";
-            btnFirebaseImport.disabled = true;
+            const originalText = btnGithubImport.innerText;
+            btnGithubImport.innerText = "⏳ 下載中...";
+            btnGithubImport.disabled = true;
             
             try {
-                let query = db.collection(collectionName);
-                // 如果不是選 'all'，就加入過濾條件
-                if (selectedTheme !== 'all') {
-                    query = query.where('theme', '==', selectedTheme);
+                // 從 GitHub 的 raw URL 下載 JSON 內容
+                const response = await fetch(fileUrl);
+                if (!response.ok) throw new Error('無法下載題庫檔案');
+                
+                const importedData = await response.json();
+                let newImages = [];
+
+                // 判斷 JSON 的結構 (相容我們自己匯出的格式或單純的陣列格式)
+                if (importedData.images && Array.isArray(importedData.images)) {
+                    newImages = importedData.images;
+                } else if (Array.isArray(importedData)) {
+                    newImages = importedData;
+                } else {
+                    throw new Error('不支援的 JSON 格式 (找不到圖片陣列)');
                 }
                 
-                const snapshot = await query.get();
-                if (snapshot.empty) {
-                    alert('❌ 找不到該主題的圖片！');
-                    return;
-                }
+                // 將資料標準化，確保相容舊有的格式
+                imagePool = newImages.map((img, index) => ({
+                    id: img.id || 'img_' + Date.now() + index,
+                    name: img.name || '未命名',
+                    icon: img.icon || '',
+                    prop: img.prop || img.category || img.attr1 || '未分類',
+                    src: img.src || img.original || '',
+                    enabled: img.enabled !== false // 預設為 true
+                }));
                 
-                const newImages = [];
-                snapshot.forEach(doc => {
-                    const data = doc.data();
-                    if (data.original) {
-                        newImages.push({
-                            id: doc.id, // 保留文檔 ID 作為唯一值
-                            name: data.name || '未命名',
-                            icon: '',
-                            prop: data.category || data.attr1 || '未分類', // 將屬性帶入供過濾辨識用
-                            src: data.original,
-                            enabled: true
-                        });
-                    }
-                });
-                
-                imagePool = newImages; // 覆蓋目前的圖庫
                 updateSizes(); 
                 renderTable(); 
-                alert(`☁️ 成功從雲端載入 ${newImages.length} 張圖片！`);
+                alert(`☁️ 成功從 GitHub 載入 ${imagePool.length} 個圖庫項目！`);
                 
             } catch (error) {
                 console.error("下載失敗:", error);
                 alert(`下載失敗！\n錯誤原因：${error.message}`);
             } finally {
-                btnFirebaseImport.innerText = originalText;
-                btnFirebaseImport.disabled = false;
+                btnGithubImport.innerText = originalText;
+                btnGithubImport.disabled = false;
             }
         });
 
